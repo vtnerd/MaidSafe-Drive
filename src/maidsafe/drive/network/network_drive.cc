@@ -36,6 +36,7 @@
 #endif
 
 #include "boost/filesystem.hpp"
+#include "boost/lexical_cast.hpp"
 #include "boost/program_options.hpp"
 #include "boost/preprocessor/stringize.hpp"
 #include "boost/system/error_code.hpp"
@@ -43,6 +44,7 @@
 #include "maidsafe/common/crypto.h"
 #include "maidsafe/common/error.h"
 #include "maidsafe/common/log.h"
+#include "maidsafe/common/make_unique.h"
 #include "maidsafe/common/process.h"
 #include "maidsafe/common/rsa.h"
 #include "maidsafe/common/utils.h"
@@ -78,8 +80,6 @@ typedef FuseDrive<nfs_client::MaidNodeNfs> NetworkDrive;
 std::unique_ptr<NetworkDrive> g_network_drive(nullptr);
 std::shared_ptr<nfs_client::MaidNodeNfs> g_maid_node_nfs;
 std::once_flag g_unmount_flag;
-std::string g_error_message;
-int g_return_code(0);
 
 void Unmount() {
   std::call_once(g_unmount_flag, [&] {
@@ -105,9 +105,10 @@ BOOL CtrlHandler(DWORD control_type) {
 
 void SetSignalHandler() {
   if (!SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(&CtrlHandler), TRUE)) {
-    g_error_message = "Failed to set control handler.\n\n";
-    g_return_code = 16;
-    BOOST_THROW_EXCEPTION(MakeError(CommonErrors::unknown));
+    BOOST_THROW_EXCEPTION(
+        maidsafe::common_error(
+            CommonErrors::unknown,
+            "Failed to set control handler"));
   }
 }
 
@@ -120,6 +121,7 @@ process::ProcessInfo GetParentProcessInfo(const Options& /*options*/) {
 // void SetSignalHandler() {}
 
 #endif
+
 
 po::options_description CommandLineOptions() {
   po::options_description options("Network Drive options");
@@ -145,11 +147,10 @@ po::variables_map ParseCommandLine(int argc, Char* argv[]) {
 
 void HandleHelp(const po::variables_map& variables_map) {
   if (variables_map.count("help")) {
-    std::ostringstream stream;
-    stream << CommandLineOptions() << "\n\n";
-    g_error_message = stream.str();
-    g_return_code = 0;
-    throw MakeError(CommonErrors::success);
+    BOOST_THROW_EXCEPTION(
+        maidsafe::common_error(
+            CommonErrors::success,
+            boost::lexical_cast<std::string>(CommandLineOptions())));
   }
 }
 
@@ -161,55 +162,46 @@ void GetOptions(const po::variables_map& variables_map, Options& options) {
 
 void ValidateOptions(const Options& options) {
   std::string error_message;
-  g_return_code = 0;
 
   if (options.mount_path.empty()) {
     error_message += "  mount_dir must be set\n";
-    ++g_return_code;
   }
   if (options.drive_name.empty()) {
     error_message += "  drive_name must be set\n";
-    ++g_return_code;
   }
   if (!options.unique_id.IsInitialised()) {
     error_message += "  unique_id must be set to a 64 character string\n";
-    ++g_return_code;
   }
   if (!options.root_parent_id.IsInitialised()) {
     error_message += "  parent_id must be set to a 64 character string\n";
-    ++g_return_code;
   }
   if (options.encrypted_maid.empty()) {
     error_message += "  encrypted_maid must be set\n";
-    ++g_return_code;
   }
   if (options.symm_key.empty()) {
     error_message += "  symm_key must be set\n";
-    ++g_return_code;
   }
   if (options.symm_iv.empty()) {
     error_message += "  symm_iv must be set\n";
-    ++g_return_code;
   }
 
-  if (g_return_code) {
-    g_error_message = "Fatal error:\n" + error_message + "\n\n";
-    BOOST_THROW_EXCEPTION(MakeError(CommonErrors::invalid_parameter));
+  if (!error_message.empty()) {
+    BOOST_THROW_EXCEPTION(
+        maidsafe::common_error(CommonErrors::invalid_parameter, error_message));
   }
 }
 
 void MonitorParentProcess(const Options& options) {
-  auto parent_process_info(GetParentProcessInfo(options));
+  const auto parent_process_info(GetParentProcessInfo(options));
   while (g_network_drive && process::IsRunning(parent_process_info))
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
   Unmount();
 }
 
 int Mount(const Options& options) {
-  std::shared_ptr<passport::Maid> maid;
   boost::system::error_code error_code;
 
-  fs::path user_app_dir(GetUserAppDir());
+  const fs::path user_app_dir(GetUserAppDir());
   if (!fs::exists(user_app_dir, error_code)) {
     LOG(kError) << "Creating " << user_app_dir;
     if (!fs::create_directories(user_app_dir, error_code)) {
@@ -218,15 +210,17 @@ int Mount(const Options& options) {
     }
   }
 
-  crypto::AES256Key symm_key(options.symm_key);
-  crypto::AES256InitialisationVector symm_iv(options.symm_iv);
-  crypto::CipherText encrypted_maid(NonEmptyString(options.encrypted_maid));
-  maid.reset(new passport::Maid(passport::DecryptMaid(encrypted_maid, symm_key, symm_iv)));
+  const crypto::AES256Key symm_key(options.symm_key);
+  const crypto::AES256InitialisationVector symm_iv(options.symm_iv);
+  const crypto::CipherText encrypted_maid(NonEmptyString(options.encrypted_maid));
 
-  g_maid_node_nfs = nfs_client::MaidNodeNfs::MakeShared(*maid);
-  g_network_drive.reset(new NetworkDrive(g_maid_node_nfs, options.unique_id,
-    options.root_parent_id, options.mount_path, user_app_dir, options.drive_name,
-    options.mount_status_shared_object_name, options.create_store));
+  g_maid_node_nfs = nfs_client::MaidNodeNfs::MakeShared(
+      passport::DecryptMaid(encrypted_maid, symm_key, symm_iv));
+
+  g_network_drive = maidsafe::make_unique<NetworkDrive>(
+      g_maid_node_nfs, options.unique_id,
+      options.root_parent_id, options.mount_path, user_app_dir, options.drive_name,
+      options.mount_status_shared_object_name, options.create_store);
 
 #ifdef MAIDSAFE_WIN32
   g_network_drive->SetGuid(BOOST_PP_STRINGIZE(PRODUCT_ID));
@@ -239,7 +233,7 @@ int Mount(const Options& options) {
   } else {
     g_network_drive->Mount();
   }
-  return 0;
+  return EXIT_SUCCESS;
 }
 
 }  // unnamed namespace
@@ -271,15 +265,15 @@ int main(int argc, char* argv[]) {
     maidsafe::drive::ValidateOptions(options);
     return maidsafe::drive::Mount(options);
   }
+  catch (const maidsafe::maidsafe_error& e) {
+      LOG(kError) << e.what();
+      return e.code().value();
+  }
   catch (const std::exception& e) {
-    if (!maidsafe::drive::g_error_message.empty()) {
-      std::cout << maidsafe::drive::g_error_message;
-      return maidsafe::drive::g_return_code;
-    }
     LOG(kError) << "Exception: " << e.what();
   }
   catch (...) {
     LOG(kError) << "Exception of unknown type!";
   }
-  return 64;
+  return EXIT_FAILURE;
 }
