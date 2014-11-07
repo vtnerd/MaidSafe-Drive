@@ -23,51 +23,29 @@ PLEASE DISCUSS - Best outcome is this interface can be used as directly as possi
 
 
 The API to be made available to Nfs (public interface) is below.
-```c++
+```C++
+
+class NfsFile {
+ public:
+  typedef std::future<std::expected<void, NfsError> Event;
+  typedef std::future<std::expected<std::string, NfsError> DataEvent;
+  
+  DataEvent Read(size_t size, off_t offset);
+  Event Write(std::string contents, off_t offset);
+  Event Truncate(off_t size);
+};
+
 template <typename IdType>
-struct NfsDrive {
+class NfsDrive {
+ public:
   NfsDrive(IdType id_type); // retrieve root dir from network) ?? template or pass the root dir ??
-  static int Chmod(const char* path, mode_t mode);
-  static int Chown(const char* path, uid_t uid, gid_t gid);
-  static int Create(const char* path, mode_t mode, struct file_info* file_info);
-  static int Fgetattr(const char* path, struct stat* stbuf, struct file_info* file_info);
-  static int Flush(const char* path, struct file_info* file_info);
-  static int Fsync(const char* path, int isdatasync, struct file_info* file_info);
-  static int FsyncDir(const char* path, int isdatasync, struct file_info* file_info);
-  static int Ftruncate(const char* path, off_t size, struct file_info* file_info);
-  static int Getattr(const char* path, struct stat* stbuf);
-  static int Link(const char* to, const char* from);
-  static int Lock(const char* path, struct fuse_file_info* file_info, int cmd, struct flock* lock);
-  static int Mkdir(const char* path, mode_t mode);
-  static int Mknod(const char* path, mode_t mode, dev_t rdev);
-  static int Open(const char* path, struct fuse_file_info* file_info);
-  static int Opendir(const char* path, struct fuse_file_info* file_info);
-  static int Read(const char* path, char* buf, size_t size, off_t offset, struct file_info* file_info);
-  static int Readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, struct file_info* file_info);
-  static int Readlink(const char* path, char* buf, size_t size);
-  static int Release(const char* path, struct file_info* file_info);
-  static int Releasedir(const char* path, struct file_info* file_info);
-  static int Rename(const char* old_name, const char* new_name);
-  static int Rmdir(const char* path);
-  static int Statfs(const char* path, struct statvfs* stbuf);
-  static int Symlink(const char* to, const char* from);
-  static int Truncate(const char* path, off_t size);
-  static int Unlink(const char* path);
-  static int Utimens(const char* path, const struct timespec ts[2]);
-  static int Write(const char* path, const char* buf, size_t size, off_t offset, struct fuse_file_info* file_info);
-  static int CeateNew(const fs::path& full_path, mode_t mode, dev_t rdev = 0);
-  static int GetAttributes(const char* path, struct stat* stbuf);
-  static int Truncate(const char* path, off_t size);
+  
+  NfsFile::Event Put(std::string path, std::string contents);
+  NfsFile::DataEvent Get(std::string path);
+  NfsFile::Event Delete(std::string path);
+  
+  std::shared_ptr<NfsFile> Create(std::string path);
+  std::shared_ptr<NfsFile> Open(std::string path);
 };
-```
-The file_info struct is as anticipated to be a very simple struct in implementation 1.0. This essentially holds the pointer / handle to an open file.
-
-```c++
-struct file_info {
-   /** File handle.  May be filled in by filesystem in open().                                       
-       Available in all other file operations */                                                     
-  uint64_t fh; 
-};
-
 ```
 
