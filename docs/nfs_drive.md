@@ -48,6 +48,9 @@ class NfsDrive {
   
   Event Create(std::string path);
   Event Open(std::string path);
+  
+  // Need an abstraction for file metadata, but not opened file ...
+  std::basic_future<std::vector<std::shared_ptr<NfsFile>>, NfsError> ListDirectory(std::string path);
 };
 ```
 
