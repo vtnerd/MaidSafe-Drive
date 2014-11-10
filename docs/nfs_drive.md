@@ -43,7 +43,7 @@ class NfsDrive {
   typedef std::basic_future<std::expected<std:shared_ptr<NfsFile>, NfsError> Event;
   
   NfsFile::DataEvent Put(std::string path, std::string contents);
-  NfsFile::DataEvent Get(std::string path);
+  NfsFile::DataEvent Get(std::string path, std::string buffer);
   NfsFile::Event Delete(std::string path);
   
   Event Create(std::string path);
