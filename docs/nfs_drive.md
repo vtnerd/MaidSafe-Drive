@@ -27,8 +27,8 @@ The API to be made available to Nfs (public interface) is below.
 
 class NfsFile {
  public:
-  typedef std::future<std::expected<void, NfsError> Event;
-  typedef std::future<std::expected<std::string, NfsError> DataEvent;
+  typedef std::basic_future<std::expected<void, NfsError> Event;
+  typedef std::basic_future<std::expected<std::string, NfsError> DataEvent;
   
   DataEvent Read(size_t size, off_t offset);
   Event Write(std::string contents, off_t offset);
@@ -40,12 +40,14 @@ class NfsDrive {
  public:
   NfsDrive(IdType id_type); // retrieve root dir from network) ?? template or pass the root dir ??
   
+  typedef std::basic_future<std::expected<std:shared_ptr<NfsFile>, NfsError> Event;
+  
   NfsFile::Event Put(std::string path, std::string contents);
   NfsFile::DataEvent Get(std::string path);
   NfsFile::Event Delete(std::string path);
   
-  std::shared_ptr<NfsFile> Create(std::string path);
-  std::shared_ptr<NfsFile> Open(std::string path);
+  Event Create(std::string path);
+  Event Open(std::string path);
 };
 ```
 
