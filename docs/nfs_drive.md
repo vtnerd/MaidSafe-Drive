@@ -31,6 +31,9 @@ class NfsFile {
   typedef std::basic_future<std::expected<std::string, NfsError> DataEvent;
   
   DataEvent Read(std::string buffer, off_t offset);
+  DataEvent Read(std::size_t length, off_t offset) {
+    return Read(std::string(length, '\0'), offset);
+  }
   DataEvent Write(std::string contents, off_t offset);
   Event Truncate(off_t size);
 };
@@ -43,7 +46,7 @@ class NfsDrive {
   typedef std::basic_future<std::expected<std:shared_ptr<NfsFile>, NfsError> Event;
   
   NfsFile::DataEvent Put(std::string path, std::string contents);
-  NfsFile::DataEvent Get(std::string path, std::string buffer);
+  NfsFile::DataEvent Get(std::string path);
   NfsFile::Event Delete(std::string path);
   
   Event Create(std::string path);
