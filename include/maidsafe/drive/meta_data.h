@@ -23,7 +23,7 @@
 #include <windows.h>
 #else
 #include <fuse/fuse.h>  // NOLINT
-#include <sys/stat.h>  // NOLINT
+#include <sys/stat.h>   // NOLINT
 #endif
 
 #include <cstdint>
@@ -44,18 +44,22 @@ namespace drive {
 
 namespace detail {
 
-namespace protobuf { class Path; class Attributes; }
-namespace test { class DirectoryTest; }
+namespace protobuf {
+class Path;
+class Attributes;
+}
+namespace test {
+class DirectoryTest;
+}
 
 // Represents directory and file information
 class MetaData {
  public:
-
   using TimePoint = common::Clock::time_point;
   using FileType = boost::filesystem::file_type;
   using Permissions = boost::filesystem::perms;
 
-  // TODO Drop this extra constructor - required by path currently
+  // TODO(Team) Drop this extra constructor - required by path currently
   explicit MetaData(FileType file_type);
   MetaData(const boost::filesystem::path& name, FileType);
   explicit MetaData(const protobuf::Path& protobuf_path);
@@ -85,7 +89,7 @@ class MetaData {
 #ifdef MAIDSAFE_WIN32
   DWORD attributes() const { return attributes_; }
   void set_attributes(const DWORD new_attributes) { attributes_ = new_attributes; }
-#endif // MAIDSAFE_WIN32
+#endif  // MAIDSAFE_WIN32
 
   void set_name(const boost::filesystem::path& new_name) { name_ = new_name; }
 
@@ -114,7 +118,6 @@ class MetaData {
   void swap(MetaData& rhs) MAIDSAFE_NOEXCEPT;
 
  private:
-
   friend class test::DirectoryTest;
 
   std::unique_ptr<encrypt::DataMap> data_map_;
@@ -141,9 +144,7 @@ class MetaData {
   MetaData(const MetaData&) = delete;
 };
 
-inline void swap(MetaData& lhs, MetaData& rhs) MAIDSAFE_NOEXCEPT {
-  lhs.swap(rhs);
-}
+inline void swap(MetaData& lhs, MetaData& rhs) MAIDSAFE_NOEXCEPT { lhs.swap(rhs); }
 
 inline bool HasPermission(const MetaData::Permissions permissions,
                           const MetaData::Permissions expected_permission) {

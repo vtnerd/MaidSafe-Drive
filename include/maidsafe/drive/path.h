@@ -23,6 +23,7 @@
 #include <atomic>
 #include <thread>
 #include <string>
+#include <vector>
 
 #include "maidsafe/common/config.h"
 #include "maidsafe/encrypt/self_encryptor.h"
@@ -39,12 +40,10 @@ class Directory;
 
 class Path : public std::enable_shared_from_this<Path> {
  public:
-
   ~Path() {}
 
   virtual std::string Serialise() = 0;
-  virtual void Serialise(protobuf::Directory&,
-                         std::vector<ImmutableData::Name>&) = 0;
+  virtual void Serialise(protobuf::Directory&, std::vector<ImmutableData::Name>&) = 0;
   virtual void ScheduleForStoring() = 0;
 
   std::shared_ptr<Directory> Parent() const;
