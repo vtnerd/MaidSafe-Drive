@@ -50,10 +50,11 @@ extern "C" char** environ;
 
 #include "maidsafe/common/application_support_directories.h"
 #include "maidsafe/common/log.h"
-#include "maidsafe/common/test.h"
 #include "maidsafe/common/on_scope_exit.h"
-#include "maidsafe/common/utils.h"
+#include "maidsafe/common/make_unique.h"
 #include "maidsafe/common/process.h"
+#include "maidsafe/common/utils.h"
+#include "maidsafe/common/test.h"
 #ifdef MAIDSAFE_WIN32
 #include "maidsafe/drive/tools/commands/windows_file_commands.h"
 #else
@@ -76,7 +77,7 @@ drive::Options g_options;
 std::shared_ptr<drive::Launcher> g_launcher;
 drive::DriveType g_test_type;
 
-std::function<void()> clean_root([] {
+const auto clean_root = [] {
   // On Windows, this frequently fails on the first attempt due to lingering open handles in the
   // VFS, so we make several attempts to clean up the root dir before failing.
   int attempts(0);
@@ -95,7 +96,7 @@ std::function<void()> clean_root([] {
     }
   }
   std::cout << "Failed to cleanup " << g_root << " - " << error_message << '\n';
-});
+};
 
 void RequireExists(const fs::path& path) {
   boost::system::error_code error_code;
@@ -126,8 +127,7 @@ fs::path CreateDirectory(const fs::path& parent) {
 
 std::vector<fs::path> CreateDirectoryHierarchy(const fs::path& parent) {
   std::vector<fs::path> directories;
-  auto directory(CreateDirectory(parent));
-  directories.push_back(directory);
+  directories.push_back(CreateDirectory(parent));
 
   // Add further directories 3 levels deep
   for (int i(0); i != 3; ++i) {
@@ -271,17 +271,21 @@ void DownloadFile(const fs::path& start_directory, const std::string& url) {
 
 void CreateAndBuildMinimalCppProject(const fs::path& path) {
   boost::system::error_code error_code;
-  fs::path project_main(CreateDirectory(path)), project(CreateDirectory(project_main)),
-      build(CreateDirectory(project_main)), shell_path(boost::process::shell_path());
-  std::string project_name(project.filename().string()), command_args, content, project_file,
-      cmake_generator(BOOST_PP_STRINGIZE(CMAKE_GENERATOR)),
-      slash(fs::path("/").make_preferred().string());
+  const fs::path project_main(CreateDirectory(path));
+  const fs::path project(CreateDirectory(project_main));
+  const fs::path build(CreateDirectory(project_main));
+  const fs::path shell_path(boost::process::shell_path());
+  const std::string project_name(project.filename().string());
+  const std::string cmake_generator(BOOST_PP_STRINGIZE(CMAKE_GENERATOR));
+
+  std::string command_args, content;
+  fs::path project_file;
   {
     // cmake
     content = std::string("cmake_minimum_required(VERSION 2.8.11.2 FATAL_ERROR)\n") + "project(" +
               project_name + ")\n" + "add_subdirectory(" + project_name + ")";
 
-    auto main_cmake_file(project_main / "CMakeLists.txt");
+    const fs::path main_cmake_file(project_main / "CMakeLists.txt");
     ASSERT_TRUE(WriteFile(main_cmake_file, content));
     ASSERT_TRUE(fs::exists(main_cmake_file, error_code));
 
@@ -299,14 +303,14 @@ void CreateAndBuildMinimalCppProject(const fs::path& path) {
 
 #ifdef MAIDSAFE_WIN32
     command_args = " /k cmake .. -G" + cmake_generator + " 1>nul 2>nul & exit";
-    project_file = build.string() + slash + project_name + ".sln";
+    project_file = build / std::string(project_name + ".sln");
 #else
-    auto script(build / "cmake.sh");
+    const fs::path script(build / "cmake.sh");
     content = "#!/bin/bash\ncmake .. -G" + cmake_generator + " 1>/dev/null 2>/dev/null ; exit";
     ASSERT_TRUE(WriteFile(script, content));
     ASSERT_TRUE(fs::exists(script, error_code));
     command_args = script.filename().string();
-    project_file = build.string() + slash + "Makefile";
+    project_file = build / "Makefile";
 #endif
 
     std::vector<std::string> process_args;
@@ -330,15 +334,14 @@ void CreateAndBuildMinimalCppProject(const fs::path& path) {
 // release
 #ifdef MAIDSAFE_WIN32
     command_args = " /k cmake --build . --config Release 1>nul 2>nul & exit";
-    project_file =
-        build.string() + slash + project_name + slash + "Release" + slash + project_name + ".exe";
+    project_file = build / project_name / "Release" / std::string(project_name + ".exe");
 #else
-    auto script(build / "release_build.sh");
+    const fs::path script(build / "release_build.sh");
     content = "#!/bin/bash\ncmake --build . --config Release 1>/dev/null 2>/dev/null ; exit";
     ASSERT_TRUE(WriteFile(script, content));
     ASSERT_TRUE(fs::exists(script, error_code));
     command_args = script.filename().string();
-    project_file = build.string() + slash + project_name + slash + project_name;
+    project_file = build / project_name / project_name;
 #endif
 
     std::vector<std::string> process_args;
@@ -362,15 +365,14 @@ void CreateAndBuildMinimalCppProject(const fs::path& path) {
 // debug
 #ifdef MAIDSAFE_WIN32
     command_args = " /k cmake --build . --config Debug 1>nul 2>nul & exit";
-    project_file =
-        build.string() + slash + project_name + slash + "Debug" + slash + project_name + ".exe";
+    project_file = build / project_name / "Debug" / std::string(project_name + ".exe");
 #else
-    auto script(build / "debug_build.sh");
+    const fs::path script(build / "debug_build.sh");
     content = "#!/bin/bash\ncmake --build . --config Debug 1>/dev/null 2>/dev/null ; exit";
     ASSERT_TRUE(WriteFile(script, content));
     ASSERT_TRUE(fs::exists(script, error_code));
     command_args = script.filename().string();
-    project_file = build.string() + slash + project_name + slash + project_name;
+    project_file = build / project_name / project_name;
 #endif
 
     std::vector<std::string> process_args;
@@ -473,51 +475,6 @@ void WriteUtf8FileAndEdit(const fs::path& start_directory) {
   RequireExists(utf8_file);
 }
 
-#ifndef MAIDSAFE_WIN32
-// void RunFsTest(const fs::path& start_directory) {
-//  boost::system::error_code error_code;
-//  fs::path resources(BOOST_PP_STRINGIZE(DRIVE_TESTS_RESOURCES)),
-//           fstest(resources.parent_path() / "pjd-fstest-20080816/fstest"),
-//           shell_path(boost::process::shell_path());
-//  std::string content, script, command_args;
-
-//  int exit_code(0);
-//  script = "fstest.sh";
-//  content = std::string("#!/bin/bash\n")
-//          + "prove -r " + fstest.string() + " 1>/dev/null 2>/dev/null\n"
-//          + "exit";
-//  command_args = "sudo " + script;
-
-//  auto script_file(start_directory / script);
-//  ASSERT_TRUE(WriteFile(script_file, content));
-//  ASSERT_TRUE(fs::exists(script_file, error_code));
-
-//  int result(setuid(0));
-// #if !defined(MAIDSAFE_APPLE) && !defined(MAIDSAFE_BSD)
-//  clearenv();
-// #endif
-//  result = system((start_directory.string() + script).c_str());
-//  static_cast<void>(result);
-
-//  std::vector<std::string> process_args;
-//  process_args.emplace_back(shell_path.string());
-//  process_args.emplace_back(command_args);
-//  const auto command_line(process::ConstructCommandLine(process_args));
-
-//  boost::process::child child = boost::process::execute(
-//      boost::process::initializers::start_in_dir(start_directory.string()),
-//      boost::process::initializers::run_exe(shell_path),
-//      boost::process::initializers::set_cmd_line(command_line),
-//      boost::process::initializers::inherit_env(),
-//      boost::process::initializers::set_on_error(error_code));
-
-//  ASSERT_TRUE(error_code.value() == 0);
-//  exit_code = boost::process::wait_for_exit(child, error_code);
-//  ASSERT_TRUE(error_code.value() == 0);
-//  ASSERT_TRUE(exit_code == 0);
-// }
-#endif
-
 }  // unnamed namespace
 
 int RunTool(int argc, char** argv, const fs::path& root, const fs::path& temp,
@@ -555,24 +512,24 @@ TEST(FileSystemTest, BEH_DriveSize) {
 }
 
 TEST(FileSystemTest, BEH_CreateEmptyFile) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   CreateFile(g_root, 0);
 }
 
 TEST(FileSystemTest, BEH_CreateEmptyDirectory) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   CreateDirectory(g_root);
 }
 
 TEST(FileSystemTest, BEH_AppendToFile) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath(CreateFile(g_root, 0).first);
   int test_runs = 1000;
-  WriteFile(filepath, "a");
+  ASSERT_TRUE(WriteFile(filepath, "a"));
   NonEmptyString content, updated_content;
   for (int i = 0; i < test_runs; ++i) {
     ASSERT_NO_THROW(content = ReadFile(filepath));
-    ASSERT_TRUE(WriteFile(filepath, content.string() + "a"));
+    ASSERT_TRUE(WriteFile(filepath, content.string() + "a")) << "Count :" << i;
     ASSERT_NO_THROW(updated_content = ReadFile(filepath));
     ASSERT_TRUE(updated_content.string().size() == content.string().size() + 1);
     ASSERT_TRUE(updated_content.string().size() == i + 2U);
@@ -580,7 +537,7 @@ TEST(FileSystemTest, BEH_AppendToFile) {
 }
 
 TEST(FileSystemTest, BEH_CopyEmptyDirectory) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectory(g_temp));
 
   // Copy 'g_temp' directory to 'g_root'
@@ -592,7 +549,7 @@ TEST(FileSystemTest, BEH_CopyEmptyDirectory) {
 
 TEST(FileSystemTest, BEH_CopyDirectoryThenDelete) {
   // Create a file and directory in a newly created directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectory(g_temp));
   auto filepath(CreateFile(directory, RandomUint32() % 1024).first);
   auto nested_directory(CreateDirectory(directory));
@@ -617,7 +574,7 @@ TEST(FileSystemTest, BEH_CopyDirectoryThenDelete) {
 
 TEST(FileSystemTest, BEH_CopyDirectoryDeleteThenReCopy) {
   // Create a file and directory in a newly created directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectory(g_temp));
   auto filepath(CreateFile(directory, RandomUint32() % 1024).first);
   auto nested_directory(CreateDirectory(directory));
@@ -639,7 +596,7 @@ TEST(FileSystemTest, BEH_CopyDirectoryDeleteThenReCopy) {
 
 TEST(FileSystemTest, BEH_CopyDirectoryThenRename) {
   // Create a file and directory in a newly created directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectory(g_temp));
   auto filepath(CreateFile(directory, RandomUint32() % 1024).first);
   auto nested_directory(CreateDirectory(directory));
@@ -660,7 +617,7 @@ TEST(FileSystemTest, BEH_CopyDirectoryThenRename) {
 
 TEST(FileSystemTest, BEH_CopyDirectoryRenameThenReCopy) {
   // Create a file and directory in a newly created directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectory(g_temp));
   auto filepath(CreateFile(directory, RandomUint32() % 1024).first);
   auto nested_directory(CreateDirectory(directory));
@@ -684,7 +641,7 @@ TEST(FileSystemTest, BEH_CopyDirectoryRenameThenReCopy) {
 
 TEST(FileSystemTest, BEH_CopyDirectoryContainingMultipleFiles) {
   // Create files in a newly created directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectoryContainingFiles(g_temp));
 
   // Copy directory to 'g_root'
@@ -698,7 +655,7 @@ TEST(FileSystemTest, BEH_CopyDirectoryContainingMultipleFiles) {
 }
 
 TEST(FileSystemTest, BEH_CopyDirectoryHierarchy) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   // Create a new hierarchy in 'g_temp'
   std::vector<fs::path> directories(CreateDirectoryHierarchy(g_temp));
   // Copy hierarchy to 'g_root'
@@ -713,7 +670,7 @@ TEST(FileSystemTest, BEH_CopyDirectoryHierarchy) {
 
 TEST(FileSystemTest, BEH_CopyThenCopyCopiedFile) {
   // Create a file in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath(CreateFile(g_temp, RandomUint32() % 1048577).first);
 
   // Copy file to 'g_root'
@@ -733,7 +690,7 @@ TEST(FileSystemTest, BEH_CopyThenCopyCopiedFile) {
 
 TEST(FileSystemTest, BEH_CopyFileDeleteThenReCopy) {
   // Create a file in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath(CreateFile(g_temp, RandomUint32() % 1048577).first);
 
   // Copy file to 'g_root'
@@ -756,7 +713,7 @@ TEST(FileSystemTest, BEH_CopyFileDeleteThenReCopy) {
 
 TEST(FileSystemTest, BEH_CopyFileRenameThenRecopy) {
   // Create a file in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath(CreateFile(g_temp, RandomUint32() % 1048577).first);
 
   // Copy file to 'g_root'
@@ -782,7 +739,7 @@ TEST(FileSystemTest, BEH_CopyFileRenameThenRecopy) {
 
 TEST(FileSystemTest, BEH_CopyFileDeleteRead) {
   // Create a file in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath(CreateFile(g_temp, RandomUint32() % 1048577).first);
 
   // Copy file to 'g_root'
@@ -805,14 +762,14 @@ TEST(FileSystemTest, BEH_CopyFileDeleteRead) {
 
 TEST(FileSystemTest, BEH_CreateFile) {
   // Create a file in 'g_root' and read back its contents
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath_and_contents(CreateFile(g_root, RandomUint32() % 1048577));
   ASSERT_TRUE(ReadFile(filepath_and_contents.first).string() == filepath_and_contents.second);
 }
 
 TEST(FileSystemTest, BEH_CreateFileModifyThenRead) {
   // Create a file in 'g_root'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
 
   std::pair<fs::path, std::string> filepath_and_contents;
   filepath_and_contents = CreateFile(g_root, (RandomUint32() % 1048) + 1048577);
@@ -835,7 +792,7 @@ TEST(FileSystemTest, BEH_CreateFileModifyThenRead) {
 
 TEST(FileSystemTest, BEH_RenameFileToDifferentParentDirectory) {
   // Create a file in a newly created directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto directory(CreateDirectory(g_temp));
   auto filepath_and_contents(CreateFile(directory, RandomUint32() % 1024));
 
@@ -856,7 +813,7 @@ TEST(FileSystemTest, BEH_RenameFileToDifferentParentDirectory) {
 
 TEST(FileSystemTest, BEH_RenameDirectoryHierarchyKeepingSameParent) {
   // Create a new directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   std::vector<fs::path> directories;
   auto directory(CreateDirectory(g_temp));
   directories.push_back(directory);
@@ -899,7 +856,7 @@ TEST(FileSystemTest, BEH_RenameDirectoryHierarchyKeepingSameParent) {
 
 TEST(FileSystemTest, BEH_RenameDirectoryHierarchyToDifferentParent) {
   // Create a new directory in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   std::vector<fs::path> directories;
   auto directory(CreateDirectory(g_temp));
   directories.push_back(directory);
@@ -943,7 +900,7 @@ TEST(FileSystemTest, BEH_RenameDirectoryHierarchyToDifferentParent) {
 
 TEST(FileSystemTest, BEH_CheckFailures) {
   // Create a file in 'g_temp'
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   auto filepath0(CreateFile(g_temp, RandomUint32() % 1048577).first);
 
   // Copy file to 'g_root'
@@ -1064,36 +1021,40 @@ TEST(FileSystemTest, BEH_CheckFailures) {
 }
 
 TEST(FileSystemTest, BEH_ReadOnlyAttribute) {
-  on_scope_exit cleanup(clean_root);
-#ifdef MAIDSAFE_WIN32
-  HANDLE handle(nullptr);
-  fs::path path(g_root / RandomAlphaNumericString(8));
+  const on_scope_exit cleanup(clean_root);
+  const fs::path path(g_root / RandomAlphaNumericString(8));
   const size_t buffer_size(1024);
   std::string buffer(RandomString(buffer_size));
+
+#ifdef MAIDSAFE_WIN32
   DWORD position(0), size(0), attributes(0);
   BOOL success(0);
   OVERLAPPED overlapped;
 
   // create a file
-  EXPECT_NO_THROW(
-      handle = dtc::CreateFileCommand(path, GENERIC_ALL, 0, CREATE_NEW, FILE_ATTRIBUTE_ARCHIVE));
-  ASSERT_NE(nullptr, handle);
-  EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle, path, buffer, &position, nullptr));
-  EXPECT_TRUE((size = dtc::GetFileSizeCommand(handle, nullptr)) == buffer_size);
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(handle));
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_NO_THROW(
+        handle = dtc::CreateFileCommand(path, (GENERIC_WRITE | GENERIC_READ), 0, CREATE_NEW, FILE_ATTRIBUTE_ARCHIVE));
+    ASSERT_NE(nullptr, handle);
+    EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle.get(), path, buffer, &position, nullptr));
+    EXPECT_TRUE((size = dtc::GetFileSizeCommand(handle.get(), nullptr)) == buffer_size);
+  }
   // check we can open and write to the file
-  EXPECT_NO_THROW(handle = dtc::CreateFileCommand(path, GENERIC_ALL, 0, OPEN_EXISTING, attributes));
-  ASSERT_NE(nullptr, handle);
-  buffer = RandomString(buffer_size);
-  success = 0;
-  position = 1;
-  FillMemory(&overlapped, sizeof(overlapped), 0);
-  overlapped.Offset = position & 0xFFFFFFFF;
-  overlapped.OffsetHigh = 0;
-  EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle, path, buffer, &position, &overlapped));
-  size = 0;
-  EXPECT_TRUE((size = dtc::GetFileSizeCommand(handle, nullptr)) == buffer_size + 1);
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(handle));
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_NO_THROW(handle = dtc::CreateFileCommand(path, (GENERIC_WRITE | GENERIC_READ), 0, OPEN_EXISTING, attributes));
+    ASSERT_NE(nullptr, handle);
+    buffer = RandomString(buffer_size);
+    success = 0;
+    position = 1;
+    FillMemory(&overlapped, sizeof(overlapped), 0);
+    overlapped.Offset = position & 0xFFFFFFFF;
+    overlapped.OffsetHigh = 0;
+    EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle.get(), path, buffer, &position, &overlapped));
+    size = 0;
+    EXPECT_TRUE((size = dtc::GetFileSizeCommand(handle.get(), nullptr)) == buffer_size + 1);
+  }
   // add read-only to the attributes
   EXPECT_NO_THROW(attributes = dtc::GetFileAttributesCommand(path));
   EXPECT_TRUE((attributes & FILE_ATTRIBUTE_ARCHIVE) == FILE_ATTRIBUTE_ARCHIVE);
@@ -1103,30 +1064,29 @@ TEST(FileSystemTest, BEH_ReadOnlyAttribute) {
   EXPECT_TRUE((attributes & FILE_ATTRIBUTE_ARCHIVE) == FILE_ATTRIBUTE_ARCHIVE);
   EXPECT_TRUE((attributes & FILE_ATTRIBUTE_READONLY) == FILE_ATTRIBUTE_READONLY);
   // check we can open for reading but can't write to the file
-  EXPECT_THROW(handle = dtc::CreateFileCommand(path, GENERIC_ALL, 0, OPEN_EXISTING, attributes),
-               std::exception);
-  EXPECT_NO_THROW(handle =
-                      dtc::CreateFileCommand(path, GENERIC_READ, 0, OPEN_EXISTING, attributes));
-  ASSERT_NE(nullptr, handle);
-  buffer = RandomString(buffer_size);
-  success = 0;
-  position = 2;
-  FillMemory(&overlapped, sizeof(overlapped), 0);
-  overlapped.Offset = position & 0xFFFFFFFF;
-  overlapped.OffsetHigh = 0;
-  EXPECT_THROW(success = dtc::WriteFileCommand(handle, path, buffer, &position, &overlapped),
-               std::exception);
-  size = 0;
-  EXPECT_TRUE((size = dtc::GetFileSizeCommand(handle, nullptr)) == buffer_size + 1);
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(handle));
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_THROW(handle = dtc::CreateFileCommand(path, (GENERIC_WRITE | GENERIC_READ), 0, OPEN_EXISTING, attributes),
+                 std::exception);
+    EXPECT_NO_THROW(handle =
+        dtc::CreateFileCommand(path, GENERIC_READ, 0, OPEN_EXISTING, attributes));
+    ASSERT_NE(nullptr, handle);
+    buffer = RandomString(buffer_size);
+    success = 0;
+    position = 2;
+    FillMemory(&overlapped, sizeof(overlapped), 0);
+    overlapped.Offset = position & 0xFFFFFFFF;
+    overlapped.OffsetHigh = 0;
+    EXPECT_THROW(success = dtc::WriteFileCommand(handle.get(), path, buffer, &position, &overlapped),
+                 std::exception);
+    size = 0;
+    EXPECT_TRUE((size = dtc::GetFileSizeCommand(handle.get(), nullptr)) == buffer_size + 1);
+  }
   // remove the read-only attribute so the file can be deleted
   EXPECT_NO_THROW(success = dtc::SetFileAttributesCommand(path, FILE_ATTRIBUTE_ARCHIVE));
   EXPECT_NO_THROW(success = dtc::DeleteFileCommand(path));
 #else
   int file_descriptor(-1);
-  fs::path path(g_root / RandomAlphaNumericString(8));
-  const size_t buffer_size(1024);
-  std::string buffer(RandomString(buffer_size));
   int flags(O_CREAT | O_RDWR), size(0);
   ssize_t result(0);
   mode_t mode(S_IRWXU);
@@ -1156,43 +1116,61 @@ TEST(FileSystemTest, BEH_ReadOnlyAttribute) {
   EXPECT_TRUE((mode & S_IRUSR) == S_IRUSR);
   EXPECT_TRUE((mode & S_IWUSR) == S_IWUSR);
   mode = S_IRUSR;
-  EXPECT_NO_THROW(dtc::SetModeCommand(path, mode));
+  EXPECT_THROW(dtc::SetModeCommand(path, mode), maidsafe::common_error) << "Mode setting should be disabled";
   EXPECT_NO_THROW(mode = dtc::GetModeCommand(path));
   EXPECT_TRUE((mode & S_IFREG) == S_IFREG);
   EXPECT_TRUE((mode & S_IRUSR) == S_IRUSR);
-  EXPECT_TRUE((mode & S_IWUSR) == 0);
-  // check we can open for reading but can't write to the file
-  EXPECT_THROW(file_descriptor = dtc::CreateFileCommand(path, flags), std::exception);
-  flags = O_RDONLY;
-  EXPECT_NO_THROW(file_descriptor = dtc::CreateFileCommand(path, flags));
-  buffer = RandomString(buffer_size);
-  offset = 2;
-  EXPECT_THROW(result = dtc::WriteFileCommand(file_descriptor, buffer, offset), std::exception);
-  size = 0;
-  EXPECT_NO_THROW(size = dtc::GetFileSizeCommand(file_descriptor));
-  EXPECT_TRUE(size == buffer_size + 1);
-  EXPECT_NO_THROW(dtc::CloseFileCommand(file_descriptor));
-  // remove the read-only attribute so the file can be deleted ???
-  mode = S_IRWXU;
-  EXPECT_NO_THROW(dtc::SetModeCommand(path, mode));
+  EXPECT_TRUE((mode & S_IWUSR) == S_IWUSR);
 #endif
 }
 
-TEST(FileSystemTest, BEH_DeleteOnClose) {
-  on_scope_exit cleanup(clean_root);
+TEST(FileSystemTest, BEH_InsufficientAccess) {
+  const on_scope_exit cleanup(clean_root);
+  const fs::path path(g_root / RandomAlphaNumericString(8));
+
 #ifdef MAIDSAFE_WIN32
-  HANDLE handle(nullptr);
-  fs::path path(g_root / RandomAlphaNumericString(8));
-  EXPECT_NO_THROW(
-      handle = dtc::CreateFileCommand(path, GENERIC_ALL, 0, CREATE_NEW, FILE_FLAG_DELETE_ON_CLOSE));
-  ASSERT_NE(nullptr, handle);
-  const size_t buffer_size(1024);
-  std::string buffer(RandomString(buffer_size));
-  DWORD position(0);
-  BOOL success(0);
-  EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle, path, buffer, &position, nullptr));
-  EXPECT_TRUE(fs::exists(path));
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(handle));
+  // Creating a file ignores desired permissions, and instead always uses
+  // GENERIC_WRITE on the parent directory.
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_NO_THROW(
+        handle = dtc::CreateFileCommand(path, GENERIC_ALL, 0, CREATE_NEW, FILE_ATTRIBUTE_ARCHIVE));
+    ASSERT_NE(nullptr, handle);
+  }
+  // Opening an existing file uses desired permissions, so execute bit should
+  // cause this to fail
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_THROW(
+        (handle = dtc::CreateFileCommand(path, GENERIC_ALL, 0, OPEN_EXISTING, FILE_ATTRIBUTE_ARCHIVE)),
+        common_error);
+    ASSERT_EQ(nullptr, handle);
+  }
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_NO_THROW(
+       handle = dtc::CreateFileCommand(path, (GENERIC_READ | GENERIC_WRITE), 0, OPEN_EXISTING, FILE_ATTRIBUTE_ARCHIVE));
+    ASSERT_NE(nullptr, handle);
+  }
+#endif // WIN32
+}
+
+TEST(FileSystemTest, BEH_DeleteOnClose) {
+  const on_scope_exit cleanup(clean_root);
+#ifdef MAIDSAFE_WIN32  
+  const fs::path path(g_root / RandomAlphaNumericString(8));
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_NO_THROW(
+       handle = dtc::CreateFileCommand(path, (GENERIC_READ | GENERIC_WRITE), 0, CREATE_NEW, FILE_FLAG_DELETE_ON_CLOSE));
+    ASSERT_NE(nullptr, handle);
+    const size_t buffer_size(1024);
+    std::string buffer(RandomString(buffer_size));
+    DWORD position(0);
+    BOOL success(0);
+    EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle.get(), path, buffer, &position, nullptr));
+    EXPECT_TRUE(fs::exists(path));
+  }
   EXPECT_FALSE(fs::exists(path));
 #else
   int file_descriptor(-1);
@@ -1227,9 +1205,8 @@ TEST(FileSystemTest, BEH_DeleteOnClose) {
 }
 
 TEST(FileSystemTest, BEH_HiddenAttribute) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
 #ifdef MAIDSAFE_WIN32
-  HANDLE handle(nullptr);
   fs::path directory(g_root / RandomAlphaNumericString(5)),
       file(directory / RandomAlphaNumericString(8));
   const size_t buffer_size(1024);
@@ -1239,13 +1216,15 @@ TEST(FileSystemTest, BEH_HiddenAttribute) {
 
   EXPECT_NO_THROW(success = dtc::CreateDirectoryCommand(directory));
   ASSERT_NE(0, success);
-  EXPECT_NO_THROW(
-      handle = dtc::CreateFileCommand(file, GENERIC_ALL, 0, CREATE_NEW, FILE_ATTRIBUTE_HIDDEN));
-  ASSERT_NE(nullptr, handle);
-  EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle, file, buffer, &position, nullptr));
-  EXPECT_NO_THROW(attributes = dtc::GetFileAttributesCommand(file));
-  EXPECT_TRUE((attributes & FILE_ATTRIBUTE_HIDDEN) == FILE_ATTRIBUTE_HIDDEN);
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(handle));
+  {
+    drive::detail::WinHandle handle(nullptr);
+    EXPECT_NO_THROW(
+        handle = dtc::CreateFileCommand(file, GENERIC_ALL, 0, CREATE_NEW, FILE_ATTRIBUTE_HIDDEN));
+    ASSERT_NE(nullptr, handle);
+    EXPECT_NO_THROW(success = dtc::WriteFileCommand(handle.get(), file, buffer, &position, nullptr));
+    EXPECT_NO_THROW(attributes = dtc::GetFileAttributesCommand(file));
+    EXPECT_TRUE((attributes & FILE_ATTRIBUTE_HIDDEN) == FILE_ATTRIBUTE_HIDDEN);
+  }
 
   std::vector<WIN32_FIND_DATA> files(dtc::EnumerateDirectoryCommand(directory));
   EXPECT_TRUE(files.size() == 1);
@@ -1286,9 +1265,9 @@ TEST(FileSystemTest, BEH_HiddenAttribute) {
 }
 
 TEST(FileSystemTest, BEH_CheckAttributesForConcurrentOpenInstances) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
 #ifdef MAIDSAFE_WIN32
-  HANDLE first_handle(nullptr), second_handle(nullptr);
+
   fs::path path(g_root / RandomAlphaNumericString(5));
   const size_t buffer_size(1024);
   std::string buffer(RandomString(buffer_size)), recovered(buffer_size, 0);
@@ -1297,18 +1276,21 @@ TEST(FileSystemTest, BEH_CheckAttributesForConcurrentOpenInstances) {
   OVERLAPPED overlapped;
 
   // create file
-  EXPECT_NO_THROW(first_handle =
-                      dtc::CreateFileCommand(path, GENERIC_ALL, 0, CREATE_NEW, attributes));
-  ASSERT_NE(nullptr, first_handle);
-  // write data using first instance
-  EXPECT_NO_THROW(success = dtc::WriteFileCommand(first_handle, path, buffer, &count, nullptr));
-  // verify opening a second instance throws
-  EXPECT_THROW(second_handle =
-                   dtc::CreateFileCommand(path, GENERIC_ALL, 0, OPEN_EXISTING, attributes),
-               std::exception);
-  ASSERT_EQ(nullptr, second_handle);
-  // close first instance
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(first_handle));
+  {
+    drive::detail::WinHandle first_handle(nullptr), second_handle(nullptr);
+    EXPECT_NO_THROW(first_handle =
+        dtc::CreateFileCommand(path, (GENERIC_READ | GENERIC_WRITE), 0, CREATE_NEW, attributes));
+    ASSERT_NE(nullptr, first_handle);
+    // write data using first instance
+    EXPECT_NO_THROW(success = dtc::WriteFileCommand(first_handle.get(), path, buffer, &count, nullptr));
+    // verify opening a second instance throws
+    EXPECT_THROW(second_handle =
+        dtc::CreateFileCommand(path, (GENERIC_READ | GENERIC_WRITE), 0, OPEN_EXISTING, attributes),
+        std::exception);
+    ASSERT_EQ(nullptr, second_handle);
+  }
+  drive::detail::WinHandle first_handle(nullptr), second_handle(nullptr);
+
   // reopen a first instance with shared read/write access
   EXPECT_NO_THROW(first_handle = dtc::CreateFileCommand(path, GENERIC_READ | GENERIC_WRITE,
                                                         FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -1325,12 +1307,12 @@ TEST(FileSystemTest, BEH_CheckAttributesForConcurrentOpenInstances) {
   position = 1;
   FillMemory(&overlapped, sizeof(overlapped), 0);
   overlapped.Offset = position & 0xFFFFFFFF;
-  EXPECT_NO_THROW(success = dtc::WriteFileCommand(first_handle, path, buffer, &count, &overlapped));
+  EXPECT_NO_THROW(success = dtc::WriteFileCommand(first_handle.get(), path, buffer, &count, &overlapped));
   // check the file size with the second instance
-  EXPECT_TRUE((size = dtc::GetFileSizeCommand(second_handle, nullptr)) == buffer_size + 1);
+  EXPECT_TRUE((size = dtc::GetFileSizeCommand(second_handle.get(), nullptr)) == buffer_size + 1);
   // check content with the second instance
   EXPECT_NO_THROW(success =
-                      dtc::ReadFileCommand(second_handle, path, recovered, &count, &overlapped));
+                      dtc::ReadFileCommand(second_handle.get(), path, recovered, &count, &overlapped));
   EXPECT_TRUE(recovered.compare(buffer) == 0);
   EXPECT_TRUE(count == buffer_size);
   // write to file using second instance
@@ -1340,17 +1322,14 @@ TEST(FileSystemTest, BEH_CheckAttributesForConcurrentOpenInstances) {
   FillMemory(&overlapped, sizeof(overlapped), 0);
   overlapped.Offset = position & 0xFFFFFFFF;
   EXPECT_NO_THROW(success =
-                      dtc::WriteFileCommand(second_handle, path, buffer, &count, &overlapped));
+                      dtc::WriteFileCommand(second_handle.get(), path, buffer, &count, &overlapped));
   // check the file size with the first instance
-  EXPECT_TRUE((size = dtc::GetFileSizeCommand(first_handle, nullptr)) == buffer_size + 2);
+  EXPECT_TRUE((size = dtc::GetFileSizeCommand(first_handle.get(), nullptr)) == buffer_size + 2);
   // check content with the first instance
   EXPECT_NO_THROW(success =
-                      dtc::ReadFileCommand(first_handle, path, recovered, &count, &overlapped));
+                      dtc::ReadFileCommand(first_handle.get(), path, recovered, &count, &overlapped));
   EXPECT_TRUE(recovered.compare(buffer) == 0);
   EXPECT_TRUE(count == buffer_size);
-  // close both instances
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(first_handle));
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(second_handle));
 #else
   int first_file_descriptor(-1), second_file_descriptor(-1);
   fs::path path(g_root / RandomAlphaNumericString(5));
@@ -1393,7 +1372,7 @@ TEST(FileSystemTest, BEH_CheckAttributesForConcurrentOpenInstances) {
 }
 
 TEST(FileSystemTest, BEH_Locale) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
 
 #if defined(MAIDSAFE_APPLE)
   // This test fails on OS X when run against the real disk (due to Apple's manipulation of unicode
@@ -1412,99 +1391,83 @@ TEST(FileSystemTest, BEH_Locale) {
   std::locale::global(std::locale(""));
 #endif
   fs::path::imbue(std::locale());
-  fs::path resources(BOOST_PP_STRINGIZE(DRIVE_TESTS_RESOURCES));
-  fs::path file(resources / "utf-8");
+  const fs::path resources(BOOST_PP_STRINGIZE(DRIVE_TESTS_RESOURCES));
+  const fs::path file(resources / "utf-8");
+  const auto expected_name = ReadFile(file).string();
   RequireExists(file);
-  fs::path directory(g_root / ReadFile(file).string());
+  const fs::path directory(g_root / expected_name);
   CreateDirectory(directory);
   RequireExists(directory);
-  fs::directory_iterator it(g_root);
+  const fs::directory_iterator it(g_root);
+  ASSERT_NE(fs::directory_iterator(), it);
   EXPECT_TRUE(it->path().filename() == ReadFile(file).string());
 }
 
+/* Drive currently marks all files as non-executable, and this cannot be
+   modified currently. Re-enable this test when/if this changes. */
 TEST(FileSystemTest, DISABLED_FUNC_CreateAndBuildMinimalCXXProject) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   ASSERT_NO_THROW(CreateAndBuildMinimalCppProject(g_root));
   ASSERT_NO_THROW(CreateAndBuildMinimalCppProject(g_temp));
 }
 
-TEST(FileSystemTest, DISABLED_BEH_Write256MbFileToTempAndCopyToDrive) {
-  on_scope_exit cleanup(clean_root);
-#ifdef MAIDSAFE_WIN32
-  HANDLE handle(nullptr);
-  std::string filename(RandomAlphaNumericString(8));
-  fs::path temp_file(g_temp / filename), root_file(g_root / filename);
-  const size_t size(1 << 16);
-  std::string original(size, 0), recovered(size, 0);
-  DWORD position(0), file_size(0), count(0), attributes(FILE_ATTRIBUTE_ARCHIVE);
-  BOOL success(0);
-  OVERLAPPED overlapped;
+TEST(FileSystemTest, BEH_Write256MbFileToTempAndCopyToDrive) {
+  const on_scope_exit cleanup(clean_root);
 
-  EXPECT_NO_THROW(handle =
-                      dtc::CreateFileCommand(temp_file, GENERIC_ALL, 0, CREATE_NEW, attributes));
-  ASSERT_NE(nullptr, handle);
+  const std::string filename(RandomAlphaNumericString(8));
+  const fs::path temp_file(g_temp / filename);
+  const fs::path root_file(g_root / filename);
+  const size_t read_size(1 << 20); // 1MB
 
-  for (uint32_t i = 0; i != (1 << 12); ++i) {
-    original = RandomString(size);
-    success = 0, count = 0, position = i * size;
-    FillMemory(&overlapped, sizeof(overlapped), 0);
-    overlapped.Offset = position & 0xFFFFFFFF;
-    overlapped.OffsetHigh = 0;
-    EXPECT_NO_THROW(success =
-                        dtc::WriteFileCommand(handle, temp_file, original, &count, &overlapped));
-    ASSERT_NE(0, success);
-    ASSERT_TRUE(count == size);
+  {
+    std::ofstream out_file(temp_file.string().c_str(), std::ofstream::binary);
+    ASSERT_TRUE(out_file.good());
+
+    for (uint32_t i = 0; i != (1 << 8); ++i) {
+      out_file << RandomString(read_size);
+      ASSERT_TRUE(out_file.good()) << "Count :" << i;
+    }
   }
 
-  EXPECT_TRUE((file_size = dtc::GetFileSizeCommand(handle, nullptr)) == (1 << 28));
-  EXPECT_NO_THROW(success = dtc::CloseHandleCommand(handle));
-
-  ASSERT_NO_THROW(fs::copy_file(temp_file, root_file));
+  EXPECT_NO_THROW(fs::copy_file(temp_file, root_file));
   ASSERT_TRUE(fs::exists(root_file));
 
-  HANDLE temp_handle(nullptr), root_handle(nullptr);
-  EXPECT_NO_THROW(temp_handle =
-                      dtc::CreateFileCommand(temp_file, GENERIC_ALL, 0, OPEN_EXISTING, attributes));
-  ASSERT_NE(nullptr, temp_handle);
-  ASSERT_NO_THROW(root_handle =
-                      dtc::CreateFileCommand(root_file, GENERIC_ALL, 0, OPEN_EXISTING, attributes));
-  ASSERT_NE(nullptr, root_handle);
+  {
+    std::ifstream original(temp_file.string().c_str(), std::ifstream::binary);
+    std::ifstream copy(root_file.string().c_str(), std::ifstream::binary);
+    ASSERT_TRUE(original.good());
+    ASSERT_TRUE(copy.good());
 
-  for (uint32_t i = 0; i != (1 << 12); ++i) {
-    success = 0, count = 0, position = i * size;
-    FillMemory(&overlapped, sizeof(overlapped), 0);
-    overlapped.Offset = position & 0xFFFFFFFF;
-    overlapped.OffsetHigh = 0;
-    ASSERT_NO_THROW(
-        success = dtc::ReadFileCommand(temp_handle, temp_file, original, &count, &overlapped));
-    ASSERT_NE(0, success);
-    ASSERT_TRUE(count == size);
-    success = 0, count = 0;
-    ASSERT_NO_THROW(
-        success = dtc::ReadFileCommand(root_handle, root_file, recovered, &count, &overlapped));
-    ASSERT_NE(0, success);
-    ASSERT_TRUE(count == size);
-    ASSERT_TRUE(original == recovered);
+    std::string original_data(read_size, '\0');
+    std::string copied_data(read_size, '\0');
+
+    for (uint32_t i = 0; i != (1 << 8); ++i) {
+      original.read(&original_data[0], original_data.size());
+      copy.read(&copied_data[0], copied_data.size());
+
+      EXPECT_EQ(original_data.size(), original.gcount());
+      EXPECT_EQ(original.gcount(), copy.gcount());
+      ASSERT_TRUE(original.good()) << "Count: " << i;
+      ASSERT_TRUE(copy.good()) << "Count: " << i;
+
+      EXPECT_TRUE(original_data == copied_data) <<
+        "Count : " << i <<
+        " original " << HexSubstr(original_data) <<
+        " actual " << HexSubstr(copied_data);
+    }
   }
-
-  success = 0;
-  ASSERT_NO_THROW(success = dtc::CloseHandleCommand(temp_handle));
-  ASSERT_NE(0, success);
-  success = 0;
-  ASSERT_NO_THROW(success = dtc::CloseHandleCommand(root_handle));
-  ASSERT_NE(0, success);
-#endif
-  // (TODO Team): Implementation required
 }
 
+/* Drive currently marks all files as non-executable, and this cannot be
+   modified currently. Re-enable this test when/if this changes. */
 TEST(FileSystemTest, DISABLED_BEH_WriteUtf8FileAndEdit) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   ASSERT_NO_THROW(WriteUtf8FileAndEdit(g_temp));
   ASSERT_NO_THROW(WriteUtf8FileAndEdit(g_root));
 }
 
 TEST(FileSystemTest, DISABLED_FUNC_DownloadMovieThenCopyToDrive) {
-  on_scope_exit cleanup(clean_root);
+  const on_scope_exit cleanup(clean_root);
   std::string movie("TheKid_512kb.mp4");
   ASSERT_NO_THROW(
       DownloadFile(g_temp, "https://ia700508.us.archive.org/12/items/TheKid_179/" + movie));
@@ -1512,46 +1475,56 @@ TEST(FileSystemTest, DISABLED_FUNC_DownloadMovieThenCopyToDrive) {
   ASSERT_TRUE(fs::exists(g_root / movie)) << "Failed to find " << (g_root / movie).string();
 }
 
-#ifndef MAIDSAFE_WIN32
-TEST(FileSystemTest, FUNC_Runfstest) {
-  on_scope_exit cleanup(clean_root);
-  // ASSERT_NO_THROW(RunFsTest(g_temp));
-  // ASSERT_NO_THROW(RunFsTest(g_root));
-  ASSERT_TRUE(true);
-}
-#endif
+TEST(FileSystemTest, FUNC_RemountDrive) {
 
-TEST(FileSystemTest, DISABLED_FUNC_RemountDrive) {
-  bool do_test(g_test_type == drive::DriveType::kLocal ||
-               g_test_type == drive::DriveType::kLocalConsole ||
-               g_test_type == drive::DriveType::kNetwork ||
-               g_test_type == drive::DriveType::kNetworkConsole);
+  const bool do_test(g_test_type == drive::DriveType::kLocal ||
+                     g_test_type == drive::DriveType::kLocalConsole ||
+                     g_test_type == drive::DriveType::kNetwork ||
+                     g_test_type == drive::DriveType::kNetworkConsole);
 
   if (do_test) {
-    on_scope_exit cleanup(clean_root);
+    const auto scratch_area = ::maidsafe::test::CreateTestPath("MaidSafe_Test_Drive");
+    ASSERT_NE(nullptr, scratch_area);
+
+    const fs::path drive_path = *scratch_area / "drive";
+    const fs::path chunk_storage = *scratch_area / "chunks";
+    fs::create_directories(drive_path);
+    fs::create_directories(chunk_storage);
+
+    drive::Options options;
+#ifdef MAIDSAFE_WIN32
+    options.mount_path = drive::GetNextAvailableDrivePath();
+#else
+    options.mount_path = drive_path;
+#endif
+    options.storage_path = chunk_storage;
+    options.drive_name = RandomAlphaNumericString(10);
+    options.unique_id = Identity(RandomAlphaNumericString(64));
+    options.root_parent_id = Identity(RandomAlphaNumericString(64));
+    options.create_store = true;
+    options.drive_type = g_test_type;
 
     // Create a new hierarchy in 'g_temp'
-    std::vector<fs::path> directories(CreateDirectoryHierarchy(g_temp));
+    const std::vector<fs::path> directories(CreateDirectoryHierarchy(g_temp));
     {
-      // Copy hierarchy to 'g_root'
-      ASSERT_TRUE(CopyDirectory(directories.front(), g_root));
-      auto copied_directory(g_root / directories.front().filename());
+      const std::unique_ptr<drive::Launcher> launcher(
+          maidsafe::make_unique<drive::Launcher>(options));
+
+      // Copy hierarchy to 'temp_root'
+      ASSERT_TRUE(CopyDirectory(directories.front(), options.mount_path));
+      auto copied_directory(options.mount_path / directories.front().filename());
       RequireExists(copied_directory);
       boost::system::error_code error_code;
       ASSERT_TRUE(!fs::is_empty(copied_directory, error_code));
       ASSERT_TRUE(error_code.value() == 0);
       RequireDirectoriesEqual(directories.front(), copied_directory, true);
-
-      Sleep(std::chrono::seconds(3));
-      g_launcher->StopDriveProcess(true);
-      g_launcher.reset();
     }
+    options.create_store = false;
     {
-      // Remount and check hierarchy for equality
-      g_options.create_store = false;
-      g_launcher.reset(new drive::Launcher(g_options));
+      const std::unique_ptr<drive::Launcher> launcher(
+          maidsafe::make_unique<drive::Launcher>(options));
 
-      auto directory(g_root / directories.front().filename());
+      auto directory(options.mount_path / directories.front().filename());
       RequireExists(directory);
       boost::system::error_code error_code;
       ASSERT_TRUE(!fs::is_empty(directory, error_code));
@@ -1566,16 +1539,22 @@ TEST(FileSystemTest, FUNC_CrossPlatformFileCheck) {
   if (g_test_type == drive::DriveType::kLocal || g_test_type == drive::DriveType::kLocalConsole ||
       g_test_type == drive::DriveType::kNetwork ||
       g_test_type == drive::DriveType::kNetworkConsole) {
-    on_scope_exit cleanup(clean_root);
-    fs::path resources(BOOST_PP_STRINGIZE(DRIVE_TESTS_RESOURCES)), root, prefix_path(g_temp),
-        cross_platform(resources / "cross_platform"), ids(cross_platform / "ids"),
-        utf8_file(resources / "utf-8.txt"), shell_path(boost::process::shell_path());
+    const on_scope_exit cleanup(clean_root);
+    const fs::path resources(BOOST_PP_STRINGIZE(DRIVE_TESTS_RESOURCES));
+    const fs::path cross_platform(resources / "cross_platform");
+    const fs::path ids(cross_platform / "ids");
+    const fs::path shell_path(boost::process::shell_path());
+    const fs::path prefix_path(g_temp);
+
+    fs::path utf8_file(resources / "utf-8.txt");
+    fs::path root;
+        
     std::string content, script, command_args, utf8_file_name;
     boost::system::error_code error_code;
 
     ASSERT_TRUE(fs::exists(utf8_file));
     ASSERT_TRUE((fs::exists(cross_platform) && fs::is_directory(cross_platform)));
-    bool is_empty(fs::is_empty(cross_platform));
+    const bool is_empty(fs::is_empty(cross_platform));
 
     utf8_file_name = utf8_file.filename().string();
     ASSERT_NO_THROW(fs::copy_file(utf8_file, prefix_path / utf8_file_name));
@@ -1586,7 +1565,7 @@ TEST(FileSystemTest, FUNC_CrossPlatformFileCheck) {
               "configure_file(\"${CMAKE_PREFIX_PATH}/" + utf8_file_name +
               "\" \"${CMAKE_PREFIX_PATH}/" + utf8_file_name + "\" NEWLINE_STYLE WIN32)";
 
-    auto cmake_file(prefix_path / "CMakeLists.txt");
+    const auto cmake_file(prefix_path / "CMakeLists.txt");
     ASSERT_TRUE(WriteFile(cmake_file, content));
     ASSERT_TRUE(fs::exists(cmake_file));
 
@@ -1604,7 +1583,7 @@ TEST(FileSystemTest, FUNC_CrossPlatformFileCheck) {
 #endif
     content += "cmake -DCMAKE_PREFIX_PATH=" + prefix_path.string() + "\nexit\n";
 
-    auto script_file(prefix_path / script);
+    const auto script_file(prefix_path / script);
     ASSERT_TRUE(WriteFile(script_file, content));
     ASSERT_TRUE(fs::exists(script_file, error_code));
 
@@ -1613,7 +1592,7 @@ TEST(FileSystemTest, FUNC_CrossPlatformFileCheck) {
     process_args.emplace_back(command_args);
     const auto command_line(process::ConstructCommandLine(process_args));
 
-    boost::process::child child =
+    const boost::process::child child =
         boost::process::execute(boost::process::initializers::start_in_dir(prefix_path.string()),
                                 boost::process::initializers::run_exe(shell_path),
                                 boost::process::initializers::set_cmd_line(command_line),
@@ -1667,7 +1646,7 @@ TEST(FileSystemTest, FUNC_CrossPlatformFileCheck) {
     // allow time for mount
     Sleep(std::chrono::seconds(1));
 
-    fs::path file(root / "file");
+    const fs::path file(root / "file");
 
     if (is_empty) {
       ASSERT_TRUE(!fs::exists(file));
@@ -1675,41 +1654,29 @@ TEST(FileSystemTest, FUNC_CrossPlatformFileCheck) {
       ASSERT_TRUE(fs::exists(file));
     } else {
       ASSERT_TRUE(fs::exists(file));
-#ifdef MAIDSAFE_WIN32
-      //  inconv required for conversion of types
-      std::locale::global(boost::locale::generator().generate(""));
-      std::wifstream original_file, recovered_file;
-
-      original_file.imbue(std::locale());
-      recovered_file.imbue(std::locale());
+      std::ifstream original_file, recovered_file;
 
       original_file.open(utf8_file.string(), std::ios_base::binary | std::ios_base::in);
       ASSERT_TRUE(original_file.good());
       recovered_file.open(file.string(), std::ios_base::binary | std::ios_base::in);
       ASSERT_TRUE(original_file.good());
 
-      std::wstring original_string(256, 0), recovered_string(256, 0);
+      std::string original_string(256, 0), recovered_string(256, 0);
       int line_count = 0;
       while (!original_file.eof() && !recovered_file.eof()) {
-        original_file.getline(const_cast<wchar_t*>(original_string.c_str()), 256);
-        recovered_file.getline(const_cast<wchar_t*>(recovered_string.c_str()), 256);
+        original_file.getline(&(original_string[0]), 256);
+        recovered_file.getline(&(recovered_string[0]), 256);
         ASSERT_TRUE(original_string == recovered_string);
         ++line_count;
       }
       ASSERT_TRUE((original_file.eof() && recovered_file.eof()));
-#endif
     }
-
-    // allow time for the version to store!
-    Sleep(std::chrono::seconds(3));
 
 #ifndef MAIDSAFE_WIN32
     launcher.reset();
     ASSERT_TRUE(fs::remove(root));
     ASSERT_TRUE(!fs::exists(root));
 #endif
-  } else {
-    EXPECT_TRUE(true);
   }
 }
 
