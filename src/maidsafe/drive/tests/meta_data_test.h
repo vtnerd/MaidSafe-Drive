@@ -16,8 +16,8 @@
     See the Licences for the specific language governing permissions and limitations relating to
     use of the MaidSafe Software.                                                                 */
 
-#ifndef MAIDSAFE_META_DATA_TEST_H_
-#define MAIDSAFE_META_DATA_TEST_H_
+#ifndef MAIDSAFE_DRIVE_TESTS_META_DATA_TEST_H_
+#define MAIDSAFE_DRIVE_TESTS_META_DATA_TEST_H_
 
 #include <set>
 
@@ -28,13 +28,12 @@ namespace drive {
 namespace detail {
 namespace test {
 
-bool VerifyPermissions(
-    const std::set<MetaData::Permissions>& expected_permissions,
-    const MetaData::Permissions actual);
+bool VerifyPermissions(const std::set<MetaData::Permissions>& expected_permissions,
+                       const MetaData::Permissions actual);
 
-} // test
-} // detail
-} // drive
-} // maidsafe
+}  // namespace test
+}  // namespace detail
+}  // namespace drive
+}  // namespace maidsafe
 
-#endif // MAIDSAFE_DRIVE_UNIX_DRIVE_H_
+#endif  // MAIDSAFE_DRIVE_TESTS_META_DATA_TEST_H_

@@ -19,16 +19,16 @@
 #ifndef MAIDSAFE_DRIVE_SYMLINK_H_
 #define MAIDSAFE_DRIVE_SYMLINK_H_
 
-#include "maidsafe/drive/path.h"
+#include <string>
+#include <vector>
 
 #include "boost/filesystem/path.hpp"
 
-namespace maidsafe
-{
-namespace drive
-{
-namespace detail
-{
+#include "maidsafe/drive/path.h"
+
+namespace maidsafe {
+namespace drive {
+namespace detail {
 
 class Symlink : public Path {
  public:
@@ -39,16 +39,14 @@ class Symlink : public Path {
   }
 
   virtual std::string Serialise();
-  virtual void Serialise(protobuf::Directory&,
-                         std::vector<ImmutableData::Name>&);
+  virtual void Serialise(protobuf::Directory&, std::vector<ImmutableData::Name>&);
   virtual void ScheduleForStoring();
 
   boost::filesystem::path Target() const;
 
  private:
   Symlink();
-  Symlink(const boost::filesystem::path& target,
-          const boost::filesystem::path& source);
+  Symlink(const boost::filesystem::path& target, const boost::filesystem::path& source);
 
   Symlink(Symlink&&) = delete;
   Symlink& operator=(Symlink) = delete;
@@ -60,8 +58,8 @@ class Symlink : public Path {
   boost::filesystem::path source;
 };
 
-} // namespace detail
-} // namespace drive
-} // namespace maidsafe
+}  // namespace detail
+}  // namespace drive
+}  // namespace maidsafe
 
-#endif // MAIDSAFE_DRIVE_SYMLINK_H_
+#endif  // MAIDSAFE_DRIVE_SYMLINK_H_
